@@ -6,6 +6,7 @@ import (
 
 	"mini-eth-compatible-transaction-gateway/internal/rpc"
 	"mini-eth-compatible-transaction-gateway/internal/store"
+	"mini-eth-compatible-transaction-gateway/internal/worker"
 )
 
 func main() {
@@ -13,6 +14,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	worker.Start(db)
 
 	http.HandleFunc("/", rpc.Handler(db))
 

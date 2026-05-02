@@ -27,51 +27,124 @@ type Response struct {
 
 func Handler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			json.NewEncoder(w).Encode(Response{
+				Jsonrpc: "2.0",
+				Error:   "failed to read request body",
+				ID:      0,
+			})
+			return
+		}
 
 		var req Request
-		json.Unmarshal(body, &req)
+		err = json.Unmarshal(body, &req)
+		if err != nil {
+			json.NewEncoder(w).Encode(Response{
+				Jsonrpc: "2.0",
+				Error:   "invalid json",
+				ID:      0,
+			})
+			return
+		}
 
 		switch req.Method {
 
 		case "eth_sendRawTransaction":
+			if len(req.Params) == 0 {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Error:   "missing params",
+					ID:      req.ID,
+				})
+				return
+			}
+
 			raw := string(req.Params[0])
 
 			hashBytes := sha256.Sum256([]byte(raw))
 			hash := "0x" + hex.EncodeToString(hashBytes[:])
 
-			_, err := db.Exec(
-				"INSERT INTO txs(hash,sender,nonce,raw,status) VALUES(?,?,?,?,?)",
-				hash, "unknown", 0, raw, "PENDING",
-			)
+			var payload types.RawTx
+			err = json.Unmarshal(req.Params[0], &payload)
+			if err != nil {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Error:   "invalid raw tx",
+					ID:      req.ID,
+				})
+				return
+			}
+
+			_, err = db.Exec(`
+				UPDATE txs
+				SET status='REPLACED', replaced_by=?
+				WHERE sender=?
+				AND nonce=?
+				AND status!='COMMITTED'
+			`, hash, payload.From, payload.Nonce)
 
 			if err != nil {
 				json.NewEncoder(w).Encode(Response{
 					Jsonrpc: "2.0",
-					Error: err.Error(),
-					ID: req.ID,
+					Error:   err.Error(),
+					ID:      req.ID,
+				})
+				return
+			}
+
+			_, err = db.Exec(`
+				INSERT INTO txs(hash,sender,nonce,raw,status)
+				VALUES(?,?,?,?,?)
+			`, hash, payload.From, payload.Nonce, raw, "PENDING")
+
+			if err != nil {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Error:   err.Error(),
+					ID:      req.ID,
 				})
 				return
 			}
 
 			json.NewEncoder(w).Encode(Response{
 				Jsonrpc: "2.0",
-				Result: hash,
-				ID: req.ID,
+				Result:  hash,
+				ID:      req.ID,
 			})
 
 		case "eth_getTransactionByHash":
-			var tx types.Transaction
+			if len(req.Params) == 0 {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Result:  nil,
+					ID:      req.ID,
+				})
+				return
+			}
 
 			var hash string
-			json.Unmarshal(req.Params[0], &hash)
+			err = json.Unmarshal(req.Params[0], &hash)
+			if err != nil {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Result:  nil,
+					ID:      req.ID,
+				})
+				return
+			}
 
-			row := db.QueryRow(
-				"SELECT hash,sender,nonce,raw,status FROM txs WHERE hash=?",
-				hash,
-			)
+			var tx types.Transaction
 
-			err := row.Scan(
+			row := db.QueryRow(`
+				SELECT hash, sender, nonce, raw, status
+				FROM txs
+				WHERE hash=?
+			`, hash)
+
+			err = row.Scan(
 				&tx.Hash,
 				&tx.Sender,
 				&tx.Nonce,
@@ -82,16 +155,23 @@ func Handler(db *sql.DB) http.HandlerFunc {
 			if err != nil {
 				json.NewEncoder(w).Encode(Response{
 					Jsonrpc: "2.0",
-					Result: nil,
-					ID: req.ID,
+					Result:  nil,
+					ID:      req.ID,
 				})
 				return
 			}
 
 			json.NewEncoder(w).Encode(Response{
 				Jsonrpc: "2.0",
-				Result: tx,
-				ID: req.ID,
+				Result:  tx,
+				ID:      req.ID,
+			})
+
+		default:
+			json.NewEncoder(w).Encode(Response{
+				Jsonrpc: "2.0",
+				Error:   "method not found",
+				ID:      req.ID,
 			})
 		}
 	}
