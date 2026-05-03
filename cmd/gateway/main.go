@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 
+	"mini-eth-compatible-transaction-gateway/internal/recovery"
 	"mini-eth-compatible-transaction-gateway/internal/rpc"
 	"mini-eth-compatible-transaction-gateway/internal/store"
 	"mini-eth-compatible-transaction-gateway/internal/worker"
@@ -14,6 +15,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer db.Close()
+
+	err = recovery.ResetInflight(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Recovered INFLIGHT transactions to PENDING")
 
 	worker.Start(db)
 

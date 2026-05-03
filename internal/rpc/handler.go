@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"mini-eth-compatible-transaction-gateway/internal/api"
 	"mini-eth-compatible-transaction-gateway/internal/types"
 )
 
@@ -136,22 +137,7 @@ func Handler(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			var tx types.Transaction
-
-			row := db.QueryRow(`
-				SELECT hash, sender, nonce, raw, status
-				FROM txs
-				WHERE hash=?
-			`, hash)
-
-			err = row.Scan(
-				&tx.Hash,
-				&tx.Sender,
-				&tx.Nonce,
-				&tx.Raw,
-				&tx.Status,
-			)
-
+			result, err := api.GetTransaction(db, hash)
 			if err != nil {
 				json.NewEncoder(w).Encode(Response{
 					Jsonrpc: "2.0",
@@ -163,7 +149,81 @@ func Handler(db *sql.DB) http.HandlerFunc {
 
 			json.NewEncoder(w).Encode(Response{
 				Jsonrpc: "2.0",
-				Result:  tx,
+				Result:  result,
+				ID:      req.ID,
+			})
+
+		case "eth_getTransactionReceipt":
+			if len(req.Params) == 0 {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Result:  nil,
+					ID:      req.ID,
+				})
+				return
+			}
+
+			var hash string
+			err = json.Unmarshal(req.Params[0], &hash)
+			if err != nil {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Result:  nil,
+					ID:      req.ID,
+				})
+				return
+			}
+
+			result, err := api.GetReceipt(db, hash)
+			if err != nil {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Result:  nil,
+					ID:      req.ID,
+				})
+				return
+			}
+
+			json.NewEncoder(w).Encode(Response{
+				Jsonrpc: "2.0",
+				Result:  result,
+				ID:      req.ID,
+			})
+
+		case "eth_getTransactionCount":
+			if len(req.Params) == 0 {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Result:  0,
+					ID:      req.ID,
+				})
+				return
+			}
+
+			var addr string
+			err = json.Unmarshal(req.Params[0], &addr)
+			if err != nil {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Result:  0,
+					ID:      req.ID,
+				})
+				return
+			}
+
+			result, err := api.GetTransactionCount(db, addr)
+			if err != nil {
+				json.NewEncoder(w).Encode(Response{
+					Jsonrpc: "2.0",
+					Result:  0,
+					ID:      req.ID,
+				})
+				return
+			}
+
+			json.NewEncoder(w).Encode(Response{
+				Jsonrpc: "2.0",
+				Result:  result,
 				ID:      req.ID,
 			})
 
